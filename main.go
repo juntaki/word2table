@@ -8,8 +8,35 @@ import (
 	"strings"
 
 	"github.com/ikawaha/kagome/tokenizer"
+	lsd "github.com/mattn/go-lsd"
 	"golang.org/x/text/unicode/norm"
 )
+
+func userdic() tokenizer.UserDic {
+	fp, err := os.Open("udic.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer fp.Close()
+	scanner := bufio.NewScanner(fp)
+
+	r := tokenizer.UserDicRecords{}
+	for scanner.Scan() {
+		token := scanner.Text()
+		r = append(r, tokenizer.UserDicRecord{
+			Text:   token,
+			Tokens: []string{token},
+			Yomi:   []string{""},
+			Pos:    "名詞",
+		})
+	}
+	udic, err := r.NewUserDic()
+	if err != nil {
+		panic(err)
+	}
+
+	return udic
+}
 
 func main() {
 	dic, err := tokenizer.NewUserDic("./dic.csv")
@@ -18,6 +45,7 @@ func main() {
 	}
 	t := tokenizer.New()
 	t.SetUserDic(dic)
+	t.SetUserDic(userdic())
 
 	fp, err := os.Open("input.txt")
 	if err != nil {
@@ -26,11 +54,18 @@ func main() {
 	defer fp.Close()
 	scanner := bufio.NewScanner(fp)
 
-	headerMap := make(map[string]struct{})
+	headerMap := make(map[string]int)
+
+	re := strings.NewReplacer(
+		"\"", "",
+		"\n", "",
+		"\r", "",
+	)
 
 	for scanner.Scan() {
 		input := scanner.Text()
 		input = string(norm.NFKC.Bytes([]byte(input)))
+		input = re.Replace(input)
 
 		output := []string{}
 		tokens := t.Tokenize(input)
@@ -38,18 +73,25 @@ func main() {
 			if token.Class == tokenizer.DUMMY {
 				continue
 			}
-			if token.Features()[1] == "空白" {
+			if token.Features()[1] == "空白" || token.Features()[1] == "接尾" {
+				continue
+			}
+			if token.Features()[0] == "助詞" ||
+				token.Features()[0] == "助動詞" ||
+				token.Features()[0] == "記号" {
 				continue
 			}
 			output = append(output, token.Surface)
 
-			headerMap[token.Surface] = struct{}{}
+			headerMap[token.Surface] += 1
 		}
 	}
 
 	header := []string{}
-	for k := range headerMap {
-		header = append(header, k)
+	for k, v := range headerMap {
+		if v > 5 {
+			header = append(header, k)
+		}
 	}
 
 	sort.Slice(header, func(i int, j int) bool {
@@ -63,6 +105,7 @@ func main() {
 	for scanner.Scan() {
 		input := scanner.Text()
 		input = string(norm.NFKC.Bytes([]byte(input)))
+		input = re.Replace(input)
 
 		output := make([]string, len(header))
 		tokens := t.Tokenize(input)
@@ -70,13 +113,21 @@ func main() {
 			if token.Class == tokenizer.DUMMY {
 				continue
 			}
-			if token.Features()[1] == "空白" {
+			if token.Features()[1] == "空白" || token.Features()[1] == "接尾" {
+				continue
+			}
+			if token.Features()[0] == "助詞" ||
+				token.Features()[0] == "助動詞" ||
+				token.Features()[0] == "記号" {
 				continue
 			}
 
 			for i, h := range header {
-				if h == token.Surface {
+				if lsd.StringDistance(h, token.Surface) == 1 && output[i] == "" && len(h) > 4 {
 					output[i] = "1"
+				}
+				if h == token.Surface {
+					output[i] = "0"
 				}
 			}
 		}
